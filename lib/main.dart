@@ -4,6 +4,7 @@ import 'package:fl_chart/fl_chart.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:http/http.dart' as http;
+import 'package:nfc_manager/nfc_manager.dart';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -733,6 +734,57 @@ class _HomePageState extends State<HomePage> {
                   ),
                   const SizedBox(height: 16),
                   const Text('Neues Filament', style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 16),
+                  OutlinedButton.icon(
+                    onPressed: () async {
+                      bool isAvailable = await NfcManager.instance.isAvailable();
+                      if (!isAvailable) {
+                        if (dialogContext.mounted) {
+                          ScaffoldMessenger.of(dialogContext).showSnackBar(
+                            const SnackBar(content: Text('NFC nicht verfügbar auf diesem Gerät')),
+                          );
+                        }
+                        return;
+                      }
+                      
+                      if (dialogContext.mounted) {
+                        ScaffoldMessenger.of(dialogContext).showSnackBar(
+                          const SnackBar(content: Text('Halte dein Handy an den NFC-Chip...')),
+                        );
+                      }
+                      
+                      try {
+                        NfcManager.instance.startSession(
+                          pollingOptions: {
+                            NfcPollingOption.iso14443,
+                            NfcPollingOption.iso15693,
+                          },
+                          onDiscovered: (NfcTag tag) async {
+                            String tagInfo = 'NFC-Tag erkannt';
+                            
+                            if (dialogContext.mounted) {
+                              ScaffoldMessenger.of(dialogContext).showSnackBar(
+                                SnackBar(content: Text(tagInfo)),
+                              );
+                            }
+                            NfcManager.instance.stopSession();
+                          },
+                        );
+                      } catch (e) {
+                        if (dialogContext.mounted) {
+                          ScaffoldMessenger.of(dialogContext).showSnackBar(
+                            SnackBar(content: Text('NFC Fehler: $e')),
+                          );
+                        }
+                      }
+                    },
+                    icon: const Icon(Icons.nfc, color: Color(0xFF00BCD4)),
+                    label: const Text('NFC-Chip scannen', style: TextStyle(color: Color(0xFF00BCD4))),
+                    style: OutlinedButton.styleFrom(
+                      side: const BorderSide(color: Color(0xFF00BCD4)),
+                      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+                    ),
+                  ),
                   const SizedBox(height: 24),
                   DropdownButtonFormField<String>(
                     value: selectedManufacturer,
