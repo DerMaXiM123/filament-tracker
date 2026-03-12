@@ -676,9 +676,11 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _addFilament() async {
-    String? selectedManufacturer;
-    String? selectedType;
-    String? selectedColor;
+    String selectedManufacturer = 'Prusa';
+    String selectedType = 'PLA';
+    String selectedColor = 'Weiß';
+    bool useCustomColor = false;
+    final customColorController = TextEditingController();
     final gewichtController = TextEditingController(text: '1000');
     final preisController = TextEditingController(text: '25');
 
@@ -688,11 +690,11 @@ class _HomePageState extends State<HomePage> {
 
     final result = await showDialog<bool>(
       context: context,
-      builder: (dialogContext) => Dialog(
-        backgroundColor: const Color(0xFF1E1E2E),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        child: StatefulBuilder(
-          builder: (context, setDialogState) => SingleChildScrollView(
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) => Dialog(
+          backgroundColor: const Color(0xFF1E1E2E),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          child: SingleChildScrollView(
             child: Padding(
               padding: const EdgeInsets.all(24),
               child: Column(
@@ -725,7 +727,7 @@ class _HomePageState extends State<HomePage> {
                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
                     ),
                     items: manufacturers.map((m) => DropdownMenuItem(value: m, child: Text(m, style: const TextStyle(color: Colors.white)))).toList(),
-                    onChanged: (v) => setDialogState(() => selectedManufacturer = v),
+                    onChanged: (v) => setDialogState(() => selectedManufacturer = v ?? 'Prusa'),
                   ),
                   const SizedBox(height: 16),
                   DropdownButtonFormField<String>(
@@ -742,25 +744,50 @@ class _HomePageState extends State<HomePage> {
                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
                     ),
                     items: types.map((t) => DropdownMenuItem(value: t, child: Text(t, style: const TextStyle(color: Colors.white)))).toList(),
-                    onChanged: (v) => setDialogState(() => selectedType = v),
+                    onChanged: (v) => setDialogState(() => selectedType = v ?? 'PLA'),
                   ),
                   const SizedBox(height: 16),
-                  DropdownButtonFormField<String>(
-                    value: selectedColor,
-                    dropdownColor: const Color(0xFF2D2D3D),
-                    style: const TextStyle(color: Colors.white),
-                    isExpanded: true,
-                    decoration: InputDecoration(
-                      labelText: 'Farbe',
-                      labelStyle: const TextStyle(color: Colors.white70),
-                      prefixIcon: const Icon(Icons.palette, color: Color(0xFF00BCD4)),
-                      filled: true,
-                      fillColor: const Color(0xFF2D2D3D),
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
-                    ),
-                    items: colors.map((c) => DropdownMenuItem(value: c, child: Text(c, style: const TextStyle(color: Colors.white)))).toList(),
-                    onChanged: (v) => setDialogState(() => selectedColor = v),
+                  Row(
+                    children: [
+                      Checkbox(
+                        value: useCustomColor,
+                        activeColor: const Color(0xFF00BCD4),
+                        onChanged: (v) => setDialogState(() => useCustomColor = v ?? false),
+                      ),
+                      const Text('Eigene Farbe', style: TextStyle(color: Colors.white70)),
+                    ],
                   ),
+                  if (useCustomColor) ...[
+                    TextField(
+                      controller: customColorController,
+                      style: const TextStyle(color: Colors.white),
+                      decoration: InputDecoration(
+                        labelText: 'Farbe eingeben',
+                        labelStyle: const TextStyle(color: Colors.white70),
+                        prefixIcon: const Icon(Icons.palette, color: Color(0xFF00BCD4)),
+                        filled: true,
+                        fillColor: const Color(0xFF2D2D3D),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                      ),
+                    ),
+                  ] else ...[
+                    DropdownButtonFormField<String>(
+                      value: selectedColor,
+                      dropdownColor: const Color(0xFF2D2D3D),
+                      style: const TextStyle(color: Colors.white),
+                      isExpanded: true,
+                      decoration: InputDecoration(
+                        labelText: 'Farbe',
+                        labelStyle: const TextStyle(color: Colors.white70),
+                        prefixIcon: const Icon(Icons.palette, color: Color(0xFF00BCD4)),
+                        filled: true,
+                        fillColor: const Color(0xFF2D2D3D),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                      ),
+                      items: colors.map((c) => DropdownMenuItem(value: c, child: Text(c, style: const TextStyle(color: Colors.white)))).toList(),
+                      onChanged: (v) => setDialogState(() => selectedColor = v ?? 'Weiß'),
+                    ),
+                  ],
                   const SizedBox(height: 16),
                   Row(
                     children: [
@@ -833,12 +860,19 @@ class _HomePageState extends State<HomePage> {
       ),
     );
 
-    if (result == true && selectedManufacturer != null && selectedType != null && selectedColor != null) {
+    if (result == true) {
+      final finalColor = useCustomColor ? customColorController.text : selectedColor;
+      if (finalColor.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Bitte Farbe eingeben')),
+        );
+        return;
+      }
       final user = widget.supabase.auth.currentUser;
       if (user?.id != null) {
         await widget.supabase.from('filamente').insert({
           'id': DateTime.now().millisecondsSinceEpoch.toString(),
-          'farbe': selectedColor,
+          'farbe': finalColor,
           'typ': selectedType,
           'marke': selectedManufacturer,
           'gewicht_gramm': int.tryParse(gewichtController.text) ?? 1000,
