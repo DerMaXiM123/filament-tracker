@@ -33,7 +33,7 @@ class FilamentTrackerApp extends StatefulWidget {
 class _FilamentTrackerAppState extends State<FilamentTrackerApp> with WidgetsBindingObserver {
   bool _isLoading = true;
   bool _isLoggedIn = false;
-  String _appVersion = '1.0.1';
+  String _appVersion = '1.0.2';
 
   @override
   void initState() {
@@ -886,6 +886,7 @@ class _HomePageState extends State<HomePage> {
             'restgewicht_gramm': int.tryParse(gewichtController.text) ?? 1000,
             'preis': double.tryParse(preisController.text) ?? 0,
             'user_id': user!.id,
+            'gekauft_am': DateTime.now().toIso8601String(),
           });
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
