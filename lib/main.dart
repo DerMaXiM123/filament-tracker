@@ -34,7 +34,7 @@ class FilamentTrackerApp extends StatefulWidget {
 class _FilamentTrackerAppState extends State<FilamentTrackerApp> with WidgetsBindingObserver {
   bool _isLoading = true;
   bool _isLoggedIn = false;
-  String _appVersion = '1.1.2';
+  String _appVersion = '1.1.3';
 
   @override
   void initState() {
