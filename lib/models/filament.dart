@@ -11,6 +11,7 @@ class Filament extends Equatable {
   final DateTime gekauftAm;
   final String? herkunftsland;
   final String? bemerkung;
+  final String? nfcTagId;
   final String userId;
 
   const Filament({
@@ -24,6 +25,7 @@ class Filament extends Equatable {
     required this.gekauftAm,
     this.herkunftsland,
     this.bemerkung,
+    this.nfcTagId,
     required this.userId,
   });
 
@@ -43,6 +45,7 @@ class Filament extends Equatable {
     DateTime? gekauftAm,
     String? herkunftsland,
     String? bemerkung,
+    String? nfcTagId,
     String? userId,
   }) {
     return Filament(
@@ -56,6 +59,7 @@ class Filament extends Equatable {
       gekauftAm: gekauftAm ?? this.gekauftAm,
       herkunftsland: herkunftsland ?? this.herkunftsland,
       bemerkung: bemerkung ?? this.bemerkung,
+      nfcTagId: nfcTagId ?? this.nfcTagId,
       userId: userId ?? this.userId,
     );
   }
@@ -72,6 +76,7 @@ class Filament extends Equatable {
       'gekauft_am': gekauftAm.toIso8601String(),
       'herkunftsland': herkunftsland,
       'bemerkung': bemerkung,
+      'nfc_tag_id': nfcTagId,
       'user_id': userId,
     };
   }
@@ -88,6 +93,7 @@ class Filament extends Equatable {
       gekauftAm: map['gekauft_am'] != null ? DateTime.tryParse(map['gekauft_am'].toString()) ?? DateTime.now() : DateTime.now(),
       herkunftsland: map['herkunftsland']?.toString(),
       bemerkung: map['bemerkung']?.toString(),
+      nfcTagId: map['nfc_tag_id']?.toString(),
       userId: map['user_id']?.toString() ?? '',
     );
   }
@@ -104,6 +110,7 @@ class Filament extends Equatable {
         gekauftAm,
         herkunftsland,
         bemerkung,
+        nfcTagId,
         userId,
       ];
 }
