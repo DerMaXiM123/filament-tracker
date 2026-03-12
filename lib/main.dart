@@ -144,7 +144,7 @@ class _FilamentTrackerAppState extends State<FilamentTrackerApp> with WidgetsBin
           children: [
             Text(message, style: const TextStyle(color: Colors.white70)),
             const SizedBox(height: 12),
-            const Text('Neue Version verfügbar!', style: TextStyle(color: Color(0xFF00BCD4))),
+            const Text('Die neue APK wird heruntergeladen. Nach dem Download wirst du gefragt, ob du installieren möchtest.', style: TextStyle(color: Color(0xFF00BCD4), fontSize: 12)),
           ],
         ),
         actions: [
@@ -156,14 +156,28 @@ class _FilamentTrackerAppState extends State<FilamentTrackerApp> with WidgetsBin
             onPressed: () async {
               Navigator.pop(ctx);
               if (url.isNotEmpty) {
+                // Try to open directly
                 final uri = Uri.parse(url);
                 if (await canLaunchUrl(uri)) {
                   await launchUrl(uri, mode: LaunchMode.externalApplication);
+                } else {
+                  // Fallback: try to download
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: const Text('Download startet...'),
+                        action: SnackBarAction(
+                          label: 'Öffnen',
+                          onPressed: () => launchUrl(uri, mode: LaunchMode.externalApplication),
+                        ),
+                      ),
+                    );
+                  }
                 }
               }
             },
             style: FilledButton.styleFrom(backgroundColor: const Color(0xFF00BCD4)),
-            child: const Text('Download'),
+            child: const Text('Jetzt aktualisieren'),
           ),
         ],
       ),
