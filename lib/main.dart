@@ -3,6 +3,8 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 import 'dart:math' as math;
@@ -72,28 +74,34 @@ class _FilamentTrackerAppState extends State<FilamentTrackerApp> with WidgetsBin
 
   Future<void> _checkForUpdates() async {
     try {
-      // Try to read from app_updates table first (legacy)
-      final response = await Supabase.instance.client
-          .from('app_updates')
-          .select('version, download_url, message')
-          .order('created_at', ascending: false)
-          .limit(1)
-          .maybeSingle();
+      // Check GitHub releases for updates
+      final response = await http.get(
+        Uri.parse('https://api.github.com/repos/DerMaXiM123/filament-tracker/releases/latest'),
+        headers: {'Accept': 'application/vnd.github+json'},
+      );
       
-      if (response != null && mounted) {
-        final remoteVersion = response['version'] as String?;
-        if (remoteVersion != null && _needsUpdate(remoteVersion)) {
-          _showUpdateDialog(response['download_url'] ?? '', response['message'] ?? 'Neue Version verfügbar');
+      if (response.statusCode == 200 && mounted) {
+        final data = json.decode(response.body) as Map<String, dynamic>;
+        final tagName = data['tag_name'] as String? ?? 'v1.0.0';
+        final remoteVersion = tagName.replaceFirst('v', '');
+        final body = data['body'] as String? ?? 'Neue Version verfügbar!';
+        
+        // Get download URL for Android APK
+        String downloadUrl = '';
+        final assets = data['assets'] as List<dynamic>? ?? [];
+        for (var asset in assets) {
+          if ((asset['name'] as String?).toString().endsWith('.apk')) {
+            downloadUrl = asset['browser_download_url'] as String;
+            break;
+          }
+        }
+        
+        if (downloadUrl.isNotEmpty && _needsUpdate(remoteVersion)) {
+          _showUpdateDialog(downloadUrl, body);
         }
       }
     } catch (e) {
-      // Table might not exist, try storage
-      try {
-        final storageUrl = 'https://buwblyxrtiqkmmadngsb.supabase.co/storage/v1/object/public/app-releases/version.json';
-        // For now, if table doesn't work, skip update check
-      } catch (e2) {
-        // Ignore
-      }
+      // Ignore errors - update check failed
     }
   }
 
