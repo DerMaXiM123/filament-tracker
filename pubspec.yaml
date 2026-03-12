@@ -1,0 +1,38 @@
+name: filament_tracker
+description: "Filament Inventory App for 3D Printing"
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.11.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  supabase_flutter: ^2.0.0
+  fl_chart: ^1.0.0
+  uuid: ^4.5.1
+  intl: ^0.20.2
+  equatable: ^2.0.7
+  path_provider: ^2.1.0
+  file_picker: ^10.3.10
+  url_launcher: ^6.3.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.13.1
+
+flutter_launcher_icons:
+  android: "launcher_icon"
+  ios: true
+  image_path: "assets/logo/logo.png"
+  windows:
+    generate: true
+    image_path: "assets/logo/logo.png"
+    icon_size: 256
+
+flutter:
+  uses-material-design: true
