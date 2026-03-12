@@ -63,13 +63,14 @@ class _FilamentTrackerAppState extends State<FilamentTrackerApp> with WidgetsBin
         _isLoggedIn = true;
         _isLoading = false;
       });
-      _checkForUpdates();
     } else {
       setState(() {
         _isLoggedIn = false;
         _isLoading = false;
       });
     }
+    // Check for updates regardless of login status
+    _checkForUpdates();
   }
 
   Future<void> _checkForUpdates() async {
