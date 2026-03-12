@@ -33,7 +33,7 @@ class FilamentTrackerApp extends StatefulWidget {
 class _FilamentTrackerAppState extends State<FilamentTrackerApp> with WidgetsBindingObserver {
   bool _isLoading = true;
   bool _isLoggedIn = false;
-  String _appVersion = '1.0.0';
+  String _appVersion = '1.0.1';
 
   @override
   void initState() {
@@ -80,6 +80,8 @@ class _FilamentTrackerAppState extends State<FilamentTrackerApp> with WidgetsBin
         headers: {'Accept': 'application/vnd.github+json'},
       );
       
+      debugPrint('Update check response: ${response.statusCode}');
+      
       if (response.statusCode == 200 && mounted) {
         final data = json.decode(response.body) as List<dynamic>;
         if (data.isEmpty) return;
@@ -89,6 +91,8 @@ class _FilamentTrackerAppState extends State<FilamentTrackerApp> with WidgetsBin
         final tagName = latest['tag_name'] as String? ?? 'v1.0.0';
         final remoteVersion = tagName.replaceFirst('v', '');
         final body = latest['body'] as String? ?? 'Neue Version verfügbar!';
+        
+        debugPrint('Remote version: $remoteVersion, Local: $_appVersion');
         
         // Get download URL for Android APK
         String downloadUrl = '';
@@ -100,12 +104,14 @@ class _FilamentTrackerAppState extends State<FilamentTrackerApp> with WidgetsBin
           }
         }
         
+        debugPrint('Download URL: $downloadUrl');
+        
         if (downloadUrl.isNotEmpty && _needsUpdate(remoteVersion)) {
           _showUpdateDialog(downloadUrl, body);
         }
       }
     } catch (e) {
-      // Ignore errors - update check failed
+      debugPrint('Update check error: $e');
     }
   }
 
@@ -870,17 +876,30 @@ class _HomePageState extends State<HomePage> {
       }
       final user = widget.supabase.auth.currentUser;
       if (user?.id != null) {
-        await widget.supabase.from('filamente').insert({
-          'id': DateTime.now().millisecondsSinceEpoch.toString(),
-          'farbe': finalColor,
-          'typ': selectedType,
-          'marke': selectedManufacturer,
-          'gewicht_gramm': int.tryParse(gewichtController.text) ?? 1000,
-          'restgewicht_gramm': int.tryParse(gewichtController.text) ?? 1000,
-          'preis': double.tryParse(preisController.text) ?? 0,
-          'user_id': user!.id,
-        });
-        _loadData();
+        try {
+          await widget.supabase.from('filamente').insert({
+            'id': DateTime.now().millisecondsSinceEpoch.toString(),
+            'farbe': finalColor,
+            'typ': selectedType,
+            'marke': selectedManufacturer,
+            'gewicht_gramm': int.tryParse(gewichtController.text) ?? 1000,
+            'restgewicht_gramm': int.tryParse(gewichtController.text) ?? 1000,
+            'preis': double.tryParse(preisController.text) ?? 0,
+            'user_id': user!.id,
+          });
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Filament erfolgreich erstellt!'), backgroundColor: Colors.green),
+            );
+          }
+          _loadData();
+        } catch (e) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Fehler: $e'), backgroundColor: Colors.red),
+            );
+          }
+        }
       }
     }
   }
