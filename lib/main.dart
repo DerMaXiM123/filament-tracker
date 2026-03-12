@@ -5,6 +5,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:http/http.dart' as http;
 import 'package:nfc_manager/nfc_manager.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -34,13 +35,15 @@ class FilamentTrackerApp extends StatefulWidget {
 class _FilamentTrackerAppState extends State<FilamentTrackerApp> with WidgetsBindingObserver {
   bool _isLoading = true;
   bool _isLoggedIn = false;
-  String _appVersion = '1.1.0';
+  String _appVersion = '1.1.1';
+  bool _nfcChecked = false;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _checkSession();
+    _checkNfcPermissions();
   }
 
   @override
@@ -49,11 +52,84 @@ class _FilamentTrackerAppState extends State<FilamentTrackerApp> with WidgetsBin
     super.dispose();
   }
 
+  Future<void> _checkNfcPermissions() async {
+    if (_nfcChecked) return;
+    _nfcChecked = true;
+    
+    bool isAvailable = await NfcManager.instance.isAvailable();
+    if (!isAvailable && mounted) {
+      _showNfcSettingsDialog();
+    }
+  }
+
+  void _showNfcSettingsDialog() {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1E1E2E),
+        title: const Row(
+          children: [
+            Icon(Icons.nfc, color: Color(0xFF00BCD4)),
+            SizedBox(width: 8),
+            Text('NFC erforderlich', style: TextStyle(color: Colors.white)),
+          ],
+        ),
+        content: const Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'NFC wird für das Scannen von Filament-Rollen benötigt. Bitte aktiviere NFC in den Einstellungen.',
+              style: TextStyle(color: Colors.white70),
+            ),
+            SizedBox(height: 12),
+            Text(
+              'So aktivierst du NFC:',
+              style: TextStyle(color: Color(0xFF00BCD4), fontWeight: FontWeight.bold),
+            ),
+            SizedBox(height: 8),
+            Text('• Einstellungen → Verbindungen → NFC', style: TextStyle(color: Colors.white54, fontSize: 12)),
+            Text('• Oder: Schnellzugriff von oben → NFC aktivieren', style: TextStyle(color: Colors.white54, fontSize: 12)),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              // Continue without NFC
+            },
+            child: const Text('Überspringen', style: TextStyle(color: Colors.white54)),
+          ),
+          FilledButton(
+            onPressed: () async {
+              Navigator.pop(ctx);
+              // Open NFC settings
+              try {
+                await openAppSettings();
+              } catch (e) {
+                // Fallback: try to open general settings
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Bitte NFC manuell in den Einstellungen aktivieren')),
+                  );
+                }
+              }
+            },
+            style: FilledButton.styleFrom(backgroundColor: const Color(0xFF00BCD4)),
+            child: const Text('Einstellungen öffnen'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       _checkSession();
       _checkForUpdates();
+      _checkNfcPermissions();
     }
   }
 
@@ -446,6 +522,20 @@ class _HomePageState extends State<HomePage> {
   void initState() {
     super.initState();
     _loadData();
+    _checkNfcOnStart();
+  }
+
+  Future<void> _checkNfcOnStart() async {
+    await Future.delayed(const Duration(seconds: 1));
+    bool isAvailable = await NfcManager.instance.isAvailable();
+    if (!isAvailable && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('NFC nicht verfügbar. Bitte in Einstellungen aktivieren.'),
+          duration: Duration(seconds: 5),
+        ),
+      );
+    }
   }
 
   Future<void> _loadData() async {
