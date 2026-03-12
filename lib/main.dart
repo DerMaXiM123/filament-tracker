@@ -34,7 +34,7 @@ class FilamentTrackerApp extends StatefulWidget {
 class _FilamentTrackerAppState extends State<FilamentTrackerApp> with WidgetsBindingObserver {
   bool _isLoading = true;
   bool _isLoggedIn = false;
-  String _appVersion = '1.0.3';
+  String _appVersion = '1.0.8';
 
   @override
   void initState() {
@@ -131,58 +131,7 @@ class _FilamentTrackerAppState extends State<FilamentTrackerApp> with WidgetsBin
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF1E1E2E),
-        title: const Row(
-          children: [
-            Icon(Icons.system_update, color: Color(0xFF00BCD4)),
-            SizedBox(width: 8),
-            Text('Update verfügbar', style: TextStyle(color: Colors.white)),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(message, style: const TextStyle(color: Colors.white70)),
-            const SizedBox(height: 12),
-            const Text('Die neue APK wird heruntergeladen. Nach dem Download wirst du gefragt, ob du installieren möchtest.', style: TextStyle(color: Color(0xFF00BCD4), fontSize: 12)),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Später', style: TextStyle(color: Colors.white54)),
-          ),
-          FilledButton(
-            onPressed: () async {
-              Navigator.pop(ctx);
-              if (url.isNotEmpty) {
-                // Try to open directly
-                final uri = Uri.parse(url);
-                if (await canLaunchUrl(uri)) {
-                  await launchUrl(uri, mode: LaunchMode.externalApplication);
-                } else {
-                  // Fallback: try to download
-                  if (mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: const Text('Download startet...'),
-                        action: SnackBarAction(
-                          label: 'Öffnen',
-                          onPressed: () => launchUrl(uri, mode: LaunchMode.externalApplication),
-                        ),
-                      ),
-                    );
-                  }
-                }
-              }
-            },
-            style: FilledButton.styleFrom(backgroundColor: const Color(0xFF00BCD4)),
-            child: const Text('Jetzt aktualisieren'),
-          ),
-        ],
-      ),
+      builder: (ctx) => _UpdateDownloadDialog(url: url, message: message),
     );
   }
 
@@ -2224,4 +2173,196 @@ class _LEGOIsometricPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
+}
+
+class _UpdateDownloadDialog extends StatefulWidget {
+  final String url;
+  final String message;
+
+  const _UpdateDownloadDialog({required this.url, required this.message});
+
+  @override
+  State<_UpdateDownloadDialog> createState() => _UpdateDownloadDialogState();
+}
+
+class _UpdateDownloadDialogState extends State<_UpdateDownloadDialog> {
+  String _status = 'Bereit zum Download...';
+  double _progress = 0;
+  bool _downloading = false;
+  bool _downloaded = false;
+  String? _error;
+
+  Future<void> _startDownload() async {
+    setState(() {
+      _downloading = true;
+      _status = 'Download wird gestartet...';
+    });
+
+    try {
+      final client = http.Client();
+      final request = http.Request('GET', Uri.parse(widget.url));
+      final response = await client.send(request);
+      
+      final contentLength = response.contentLength ?? 0;
+      final received = <int>[];
+      
+      await for (final chunk in response.stream) {
+        received.addAll(chunk);
+        if (contentLength > 0) {
+          setState(() {
+            _progress = received.length / contentLength;
+            _status = 'Download: ${(_progress * 100).toStringAsFixed(0)}%';
+          });
+        }
+      }
+      
+      if (mounted) {
+        setState(() {
+          _downloading = false;
+          _downloaded = true;
+          _progress = 1.0;
+          _status = 'Download abgeschlossen!';
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _downloading = false;
+          _error = e.toString();
+          _status = 'Fehler: $e';
+        });
+      }
+    }
+  }
+
+  Future<void> _openDownload() async {
+    final uri = Uri.parse(widget.url);
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } else {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Konnte Download nicht öffnen')),
+        );
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: const Color(0xFF1E1E2E),
+      title: Row(
+        children: [
+          Icon(
+            _downloaded ? Icons.check_circle : Icons.system_update, 
+            color: _downloaded ? Colors.green : const Color(0xFF00BCD4)
+          ),
+          const SizedBox(width: 8),
+          Text(
+            _downloaded ? 'Update bereit' : 'Update verfügbar', 
+            style: const TextStyle(color: Colors.white)
+          ),
+        ],
+      ),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(widget.message, style: const TextStyle(color: Colors.white70)),
+          const SizedBox(height: 20),
+          if (_downloading) ...[
+            ClipRRect(
+              borderRadius: BorderRadius.circular(4),
+              child: LinearProgressIndicator(
+                value: _progress > 0 ? _progress : null,
+                backgroundColor: Colors.white24,
+                valueColor: const AlwaysStoppedAnimation(Color(0xFF00BCD4)),
+                minHeight: 8,
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
+          Row(
+            children: [
+              if (_downloading)
+                const SizedBox(
+                  width: 16, height: 16,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: Color(0xFF00BCD4),
+                  ),
+                )
+              else if (_downloaded)
+                const Icon(Icons.check, color: Colors.green, size: 16)
+              else if (_error != null)
+                const Icon(Icons.error, color: Colors.red, size: 16),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  _status,
+                  style: TextStyle(
+                    color: _error != null ? Colors.red : const Color(0xFF00BCD4),
+                    fontSize: 12,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          if (_downloaded) ...[
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.orange.withAlpha(51),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.orange.withAlpha(77)),
+              ),
+              child: const Row(
+                children: [
+                  Icon(Icons.info_outline, color: Colors.orange, size: 20),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Nach dem Öffnen wirst du gefragt, ob du die APK installieren möchtest.',
+                      style: TextStyle(color: Colors.orange, fontSize: 11),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ],
+      ),
+      actions: [
+        if (!_downloaded) ...[
+          TextButton(
+            onPressed: _downloading ? null : () => Navigator.pop(context),
+            child: Text(
+              _downloading ? 'Warte...' : 'Abbrechen', 
+              style: const TextStyle(color: Colors.white54)
+            ),
+          ),
+          FilledButton(
+            onPressed: _downloading ? null : _startDownload,
+            style: FilledButton.styleFrom(backgroundColor: const Color(0xFF00BCD4)),
+            child: const Text('Download starten'),
+          ),
+        ] else ...[
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Schließen', style: TextStyle(color: Colors.white54)),
+          ),
+          FilledButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _openDownload();
+            },
+            style: FilledButton.styleFrom(backgroundColor: Colors.green),
+            child: const Text('Jetzt installieren'),
+          ),
+        ],
+      ],
+    );
+  }
 }
