@@ -74,21 +74,25 @@ class _FilamentTrackerAppState extends State<FilamentTrackerApp> with WidgetsBin
 
   Future<void> _checkForUpdates() async {
     try {
-      // Check GitHub releases for updates
+      // Check GitHub releases for updates (including pre-releases)
       final response = await http.get(
-        Uri.parse('https://api.github.com/repos/DerMaXiM123/filament-tracker/releases/latest'),
+        Uri.parse('https://api.github.com/repos/DerMaXiM123/filament-tracker/releases'),
         headers: {'Accept': 'application/vnd.github+json'},
       );
       
       if (response.statusCode == 200 && mounted) {
-        final data = json.decode(response.body) as Map<String, dynamic>;
-        final tagName = data['tag_name'] as String? ?? 'v1.0.0';
+        final data = json.decode(response.body) as List<dynamic>;
+        if (data.isEmpty) return;
+        
+        // Get latest release (first one)
+        final latest = data[0] as Map<String, dynamic>;
+        final tagName = latest['tag_name'] as String? ?? 'v1.0.0';
         final remoteVersion = tagName.replaceFirst('v', '');
-        final body = data['body'] as String? ?? 'Neue Version verfügbar!';
+        final body = latest['body'] as String? ?? 'Neue Version verfügbar!';
         
         // Get download URL for Android APK
         String downloadUrl = '';
-        final assets = data['assets'] as List<dynamic>? ?? [];
+        final assets = latest['assets'] as List<dynamic>? ?? [];
         for (var asset in assets) {
           if ((asset['name'] as String?).toString().endsWith('.apk')) {
             downloadUrl = asset['browser_download_url'] as String;
