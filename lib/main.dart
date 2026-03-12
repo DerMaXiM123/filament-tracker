@@ -34,7 +34,7 @@ class FilamentTrackerApp extends StatefulWidget {
 class _FilamentTrackerAppState extends State<FilamentTrackerApp> with WidgetsBindingObserver {
   bool _isLoading = true;
   bool _isLoggedIn = false;
-  String _appVersion = '1.0.9';
+  String _appVersion = '1.1.0';
 
   @override
   void initState() {
@@ -687,95 +687,80 @@ class _HomePageState extends State<HomePage> {
                   const SizedBox(height: 16),
                   OutlinedButton.icon(
                     onPressed: () async {
+                      // Show dialog first
+                      if (dialogContext.mounted) {
+                        ScaffoldMessenger.of(dialogContext).showSnackBar(
+                          const SnackBar(
+                            content: Text('Halte Handy an NFC-Chip... (10 Sekunden)'),
+                            duration: Duration(seconds: 10),
+                          ),
+                        );
+                      }
+                      
                       bool isAvailable = await NfcManager.instance.isAvailable();
                       if (!isAvailable) {
                         if (dialogContext.mounted) {
                           ScaffoldMessenger.of(dialogContext).showSnackBar(
-                            const SnackBar(content: Text('NFC nicht verfügbar auf diesem Gerät')),
+                            const SnackBar(content: Text('NFC nicht verfügbar!')),
                           );
                         }
                         return;
                       }
                       
-                      if (dialogContext.mounted) {
-                        ScaffoldMessenger.of(dialogContext).showSnackBar(
-                          const SnackBar(content: Text('Halte dein Handy an den NFC-Chip...')),
-                        );
-                      }
-                      
                       try {
-                        NfcManager.instance.startSession(
+                        await NfcManager.instance.startSession(
                           pollingOptions: {
                             NfcPollingOption.iso14443,
                             NfcPollingOption.iso15693,
                           },
                           onDiscovered: (NfcTag tag) async {
-                            String? tagId;
-                            final tagData = tag.data as Map<String, dynamic>;
-                            
-                            // Try to get tag identifier from different technologies
-                            if (tagData.containsKey('nfca')) {
-                              final nfca = tagData['nfca'] as Map<dynamic, dynamic>?;
-                              if (nfca != null && nfca['identifier'] != null) {
-                                final id = nfca['identifier'] as List<dynamic>;
-                                tagId = id.map((e) => (e as int).toRadixString(16).padLeft(2, '0')).join(':').toUpperCase();
+                            try {
+                              String? tagId;
+                              final tagData = tag.data as Map<String, dynamic>;
+                              
+                              if (tagData.containsKey('nfca')) {
+                                final nfca = tagData['nfca'] as Map<dynamic, dynamic>?;
+                                if (nfca != null && nfca['identifier'] != null) {
+                                  final id = nfca['identifier'] as List<dynamic>;
+                                  tagId = id.map((e) => (e as int).toRadixString(16).padLeft(2, '0')).join(':').toUpperCase();
+                                }
                               }
-                            } else if (tagData.containsKey('nfcb')) {
-                              final nfcb = tagData['nfcb'] as Map<dynamic, dynamic>?;
-                              if (nfcb != null && nfcb['identifier'] != null) {
-                                final id = nfcb['identifier'] as List<dynamic>;
-                                tagId = id.map((e) => (e as int).toRadixString(16).padLeft(2, '0')).join(':').toUpperCase();
-                              }
-                            } else if (tagData.containsKey('nfcf')) {
-                              final nfcf = tagData['nfcf'] as Map<dynamic, dynamic>?;
-                              if (nfcf != null && nfcf['identifier'] != null) {
-                                final id = nfcf['identifier'] as List<dynamic>;
-                                tagId = id.map((e) => (e as int).toRadixString(16).padLeft(2, '0')).join(':').toUpperCase();
-                              }
-                            } else if (tagData.containsKey('nfcv')) {
-                              final nfcv = tagData['nfcv'] as Map<dynamic, dynamic>?;
-                              if (nfcv != null && nfcv['identifier'] != null) {
-                                final id = nfcv['identifier'] as List<dynamic>;
-                                tagId = id.map((e) => (e as int).toRadixString(16).padLeft(2, '0')).join(':').toUpperCase();
-                              }
-                            }
-                            
-                            // Check if filament with this NFC tag already exists
-                            if (tagId != null) {
-                              final user = widget.supabase.auth.currentUser;
-                              if (user?.id != null) {
-                                final existing = await widget.supabase.from('filamente').select().eq('user_id', user!.id).eq('nfc_tag_id', tagId).maybeSingle();
-                                
-                                if (existing != null && dialogContext.mounted) {
-                                  // Filament already exists with this NFC tag
-                                  ScaffoldMessenger.of(dialogContext).showSnackBar(
-                                    SnackBar(
-                                      content: Text('NFC-Tag gefunden! Filament: ${existing['marke']} ${existing['typ']} ${existing['farbe']}'),
-                                      backgroundColor: Colors.green,
-                                    ),
-                                  );
-                                } else if (dialogContext.mounted) {
+                              
+                              if (tagId != null) {
+                                if (dialogContext.mounted) {
                                   setDialogState(() {
                                     nfcTagId = tagId;
                                   });
                                   ScaffoldMessenger.of(dialogContext).showSnackBar(
                                     SnackBar(
-                                      content: Text('NFC-Tag gespeichert: $tagId'),
-                                      backgroundColor: const Color(0xFF00BCD4),
+                                      content: Text('NFC erkannt: $tagId'),
+                                      backgroundColor: Colors.green,
                                     ),
                                   );
                                 }
                               }
-                            } else {
+                            } catch (e) {
                               if (dialogContext.mounted) {
                                 ScaffoldMessenger.of(dialogContext).showSnackBar(
-                                  const SnackBar(content: Text('Konnte NFC-Tag nicht lesen')),
+                                  SnackBar(content: Text('Fehler: $e')),
                                 );
                               }
                             }
-                            NfcManager.instance.stopSession();
+                            await NfcManager.instance.stopSession();
                           },
                         );
+                        
+                        // Wait a bit and show timeout message
+                        await Future.delayed(const Duration(seconds: 8));
+                        
+                        if (dialogContext.mounted && nfcTagId == null) {
+                          ScaffoldMessenger.of(dialogContext).showSnackBar(
+                            const SnackBar(content: Text('Kein NFC-Tag gefunden. Versuche es nochmal.')),
+                          );
+                          try {
+                            await NfcManager.instance.stopSession();
+                          } catch (_) {}
+                        }
                       } catch (e) {
                         if (dialogContext.mounted) {
                           ScaffoldMessenger.of(dialogContext).showSnackBar(
