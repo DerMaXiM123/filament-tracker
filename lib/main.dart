@@ -34,7 +34,7 @@ class FilamentTrackerApp extends StatefulWidget {
 class _FilamentTrackerAppState extends State<FilamentTrackerApp> with WidgetsBindingObserver {
   bool _isLoading = true;
   bool _isLoggedIn = false;
-  String _appVersion = '1.1.3';
+  String _appVersion = '1.1.4';
 
   @override
   void initState() {
@@ -516,11 +516,113 @@ class _HomePageState extends State<HomePage> {
                   : _selectedIndex == 2
                       ? _buildStatistics()
                       : _buildSettings(),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _addFilament,
-        child: const Icon(Icons.add),
+      floatingActionButton: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          FloatingActionButton.small(
+            heroTag: 'nfc',
+            onPressed: _scanNfcTag,
+            backgroundColor: const Color(0xFF00BCD4),
+            child: const Icon(Icons.nfc),
+          ),
+          const SizedBox(height: 8),
+          FloatingActionButton(
+            heroTag: 'add',
+            onPressed: _addFilament,
+            child: const Icon(Icons.add),
+          ),
+        ],
       ),
     );
+  }
+
+  Future<void> _scanNfcTag() async {
+    try {
+      bool isAvailable = await NfcManager.instance.isAvailable();
+      if (!isAvailable) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('NFC nicht verfügbar!')),
+          );
+        }
+        return;
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Halte Handy an NFC-Tag...'),
+            duration: Duration(seconds: 15),
+          ),
+        );
+      }
+
+      await NfcManager.instance.startSession(
+        pollingOptions: {
+          NfcPollingOption.iso14443,
+          NfcPollingOption.iso15693,
+        },
+        onDiscovered: (NfcTag tag) async {
+          try {
+            String? tagId;
+            final tagData = tag.data as Map<String, dynamic>;
+            
+            if (tagData.containsKey('nfca')) {
+              final nfca = tagData['nfca'] as Map<dynamic, dynamic>?;
+              if (nfca != null && nfca['identifier'] != null) {
+                final id = nfca['identifier'] as List<dynamic>;
+                tagId = id.map((e) => (e as int).toRadixString(16).padLeft(2, '0')).join(':').toUpperCase();
+              }
+            }
+            
+            await NfcManager.instance.stopSession();
+            
+            if (tagId != null && mounted) {
+              // Check if filament with this NFC tag exists
+              final user = widget.supabase.auth.currentUser;
+              if (user?.id != null) {
+                final existing = await widget.supabase.from('filamente').select().eq('user_id', user!.id).eq('nfc_tag_id', tagId).maybeSingle();
+                
+                if (existing != null && mounted) {
+                  // Filament found - show details
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Gefunden: ${existing['marke']} ${existing['typ']} ${existing['farbe']} (${existing['restgewicht_gramm']}g)'),
+                      backgroundColor: Colors.green,
+                      duration: const Duration(seconds: 5),
+                    ),
+                  );
+                } else if (mounted) {
+                  // No filament found - open dialog to create new one
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Neuer NFC-Tag: $tagId - Lege jetzt ein Filament an!'),
+                      backgroundColor: const Color(0xFF00BCD4),
+                      duration: const Duration(seconds: 3),
+                    ),
+                  );
+                  _addFilamentWithNfc(tagId);
+                }
+              }
+            }
+          } catch (e) {
+            // Ignore errors
+          }
+        },
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('NFC Fehler: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _addFilamentWithNfc(String nfcTagId) async {
+    // This opens the add filament dialog with the NFC tag pre-filled
+    // For now, just call the normal add filament - user needs to scan NFC again in dialog
+    _addFilament();
   }
 
   Widget _buildDrawer() {
