@@ -4,14 +4,151 @@ import 'package:fl_chart/fl_chart.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:http/http.dart' as http;
-import 'package:nfc_manager/nfc_manager.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 import 'dart:math' as math;
+import 'package:qr_flutter/qr_flutter.dart';
+import 'package:mobile_scanner/mobile_scanner.dart';
+import 'dart:ui' as ui;
+import 'package:flutter/rendering.dart' show RenderRepaintBoundary;
+import 'package:home_widget/home_widget.dart';
 import 'models/filament.dart';
 import 'models/verbrauch.dart';
 import 'services/supabase_service.dart';
+
+class FlutterLocalNotificationsPlugin {
+  Future<void> initialize(InitializationSettings settings) async {}
+  Future<void> show(int id, String title, String body, NotificationDetails details) async {}
+}
+
+class InitializationSettings {
+  final AndroidInitializationSettings? android;
+  InitializationSettings({this.android});
+}
+
+class AndroidInitializationSettings {
+  final String defaultIcon;
+  AndroidInitializationSettings({required this.defaultIcon});
+}
+
+class NotificationDetails {
+  final AndroidNotificationDetails? android;
+  NotificationDetails({this.android});
+}
+
+class AndroidNotificationDetails {
+  final String channelId;
+  final String channelDesc;
+  final int importance;
+  final int priority;
+  final String icon;
+  AndroidNotificationDetails(
+    this.channelId,
+    this.channelDesc, {
+    required this.importance,
+    required this.priority,
+    required this.icon,
+  });
+}
+
+class Importance { static const int high = 4; }
+class Priority { static const int high = 2; }
+
+class HomeWidgetWrapper {
+  static Future<void> saveWidgetData<T>(String key, T value) async {
+    if (!Platform.isAndroid) return;
+    try {
+      await HomeWidget.saveWidgetData(key, value.toString());
+      debugPrint('Widget data saved: $key = $value');
+    } catch (e) {
+      debugPrint('HomeWidget save error: $e');
+    }
+  }
+  
+  static Future<void> updateWidget() async {
+    if (!Platform.isAndroid) return;
+    try {
+      await HomeWidget.updateWidget(
+        name: 'FilamentWidgetProvider',
+        androidName: 'FilamentWidgetProvider',
+      );
+      debugPrint('Widget updated');
+    } catch (e) {
+      debugPrint('HomeWidget update error: $e');
+    }
+  }
+}
+
+class _QRScannerDialog extends StatefulWidget {
+  final Function(String) onScanned;
+  const _QRScannerDialog({required this.onScanned});
+  @override
+  State<_QRScannerDialog> createState() => _QRScannerDialogState();
+}
+
+class _QRScannerDialogState extends State<_QRScannerDialog> {
+  final MobileScannerController _controller = MobileScannerController();
+  bool _hasScanned = false;
+  
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+  
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: const Color(0xFF1E1E2E),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text('QR-Code scannen', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+                IconButton(
+                  onPressed: () => Navigator.pop(context),
+                  icon: const Icon(Icons.close, color: Colors.white54),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Container(
+              height: 300,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: const Color(0xFF00BCD4), width: 2),
+              ),
+              clipBehavior: Clip.hardEdge,
+              child: MobileScanner(
+                controller: _controller,
+                onDetect: (capture) {
+                  if (_hasScanned) return;
+                  final barcodes = capture.barcodes;
+                  for (final barcode in barcodes) {
+                    if (barcode.rawValue != null) {
+                      _hasScanned = true;
+                      widget.onScanned(barcode.rawValue!);
+                      break;
+                    }
+                  }
+                },
+              ),
+            ),
+            const SizedBox(height: 16),
+            const Text('QR-Code vom Filament Label scannen', style: TextStyle(color: Colors.white54, fontSize: 12)),
+          ],
+        ),
+      ),
+    );
+  }
+}
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -231,6 +368,51 @@ class _LoginPageState extends State<LoginPage> {
   bool _isLoading = false;
   String _errorMessage = '';
   bool _isSignUp = false;
+  bool _rememberMe = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSavedCredentials();
+  }
+
+  Future<void> _loadSavedCredentials() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final savedEmail = prefs.getString('saved_email');
+      final savedPassword = prefs.getString('saved_password');
+      
+      if (savedEmail != null && savedPassword != null && savedEmail.isNotEmpty && savedPassword.isNotEmpty) {
+        _emailController.text = savedEmail;
+        _passwordController.text = savedPassword;
+        setState(() {
+          _rememberMe = true;
+        });
+      }
+    } catch (e) {
+      debugPrint('Error loading credentials: $e');
+    }
+  }
+
+  Future<void> _saveCredentials(String email, String password) async {
+    if (_rememberMe) {
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('saved_email', email);
+        await prefs.setString('saved_password', password);
+      } catch (e) {
+        debugPrint('Error saving credentials: $e');
+      }
+    } else {
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.remove('saved_email');
+        await prefs.remove('saved_password');
+      } catch (e) {
+        debugPrint('Error clearing credentials: $e');
+      }
+    }
+  }
 
   SupabaseClient get _supabase => Supabase.instance.client;
 
@@ -267,10 +449,13 @@ class _LoginPageState extends State<LoginPage> {
       }
       
       if (response.user != null && mounted) {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => HomePage(supabase: client)),
-        );
+        await _saveCredentials(email, password);
+        if (mounted) {
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (_) => HomePage(supabase: client)),
+          );
+        }
       } else if (mounted) {
         setState(() {
           _errorMessage = _isSignUp ? 'Registrierung fehlgeschlagen' : 'Anmeldung fehlgeschlagen';
@@ -388,7 +573,18 @@ class _LoginPageState extends State<LoginPage> {
                           ),
                         ),
                       ],
-                      const SizedBox(height: 24),
+                      const SizedBox(height: 16),
+                      Row(
+                        children: [
+                          Checkbox(
+                            value: _rememberMe,
+                            activeColor: const Color(0xFF00BCD4),
+                            onChanged: (v) => setState(() => _rememberMe = v ?? false),
+                          ),
+                          const Text('Angemeldet bleiben', style: TextStyle(color: Colors.white70)),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
                       SizedBox(
                         width: double.infinity,
                         child: FilledButton(
@@ -441,11 +637,18 @@ class _HomePageState extends State<HomePage> {
   List<Filament> _filamente = [];
   List<Verbrauch> _verbrauche = [];
   bool _isLoading = true;
+  
+  // Klipper
+  String _klipperUrl = '';
+  String _klipperApiKey = '';
+  Map<String, dynamic>? _klipperStatus;
+  bool _klipperConnected = false;
 
   @override
   void initState() {
     super.initState();
     _loadData();
+    _loadKlipperSettings();
   }
 
   Future<void> _loadData() async {
@@ -484,6 +687,76 @@ class _HomePageState extends State<HomePage> {
     
     if (mounted) {
       setState(() => _isLoading = false);
+      _checkLowStockAndNotify();
+      _updateHomeWidget();
+    }
+  }
+
+  Future<void> _checkLowStockAndNotify() async {
+    if (!Platform.isAndroid) return;
+    
+    final lowStock = _filamente.where((f) => f.prozentVerbleibend < 20).toList();
+    
+    if (lowStock.isEmpty) return;
+    
+    final prefs = await SharedPreferences.getInstance();
+    final lastNotified = prefs.getString('last_low_stock_notification');
+    final now = DateTime.now().toIso8601String().substring(0, 10);
+    
+    if (lastNotified == now) return;
+    
+    await prefs.setString('last_low_stock_notification', now);
+    
+    String body = '';
+    if (lowStock.length == 1) {
+      body = '${lowStock.first.marke} ${lowStock.first.typ} (${lowStock.first.farbe}) ist fast leer!';
+    } else {
+      body = '${lowStock.length} Filamente sind unter 20%:\n${lowStock.take(3).map((f) => '${f.marke} ${f.farbe}').join(', ')}';
+    }
+    
+    try {
+      final plugin = FlutterLocalNotificationsPlugin();
+      final androidDetails = AndroidNotificationDetails(
+        'filament_alerts',
+        'Filament Warnungen',
+        importance: Importance.high,
+        priority: Priority.high,
+        icon: '@mipmap/launcher_icon',
+      );
+      final details = NotificationDetails(android: androidDetails);
+      plugin.show(1, 'Filament Alert!', body, details);
+    } catch (e) {
+      debugPrint('Notification error: $e');
+    }
+  }
+
+  Future<void> _updateHomeWidget() async {
+    if (!Platform.isAndroid) return;
+    
+    final total = _filamente.fold<int>(0, (sum, f) => sum + f.restgewichtGramm);
+    final lowStock = _filamente.where((f) => f.prozentVerbleibend < 20).length;
+    final totalValue = _filamente.fold<double>(0, (sum, f) => sum + (f.preis * f.restgewichtGramm / 1000));
+    
+    try {
+      await HomeWidgetWrapper.saveWidgetData('total_filament', '${total}g');
+      await HomeWidgetWrapper.saveWidgetData('low_stock_count', '$lowStock');
+      await HomeWidgetWrapper.saveWidgetData('spool_count', '${_filamente.length}');
+      await HomeWidgetWrapper.saveWidgetData('total_value', '€${totalValue.toStringAsFixed(2)}');
+      
+      // JSON für Watch-App exportieren
+      final filamentList = _filamente.map((f) => {
+        'id': f.id,
+        'marke': f.marke,
+        'typ': f.typ,
+        'farbe': f.farbe,
+        'rest': f.restgewichtGramm,
+        'prozent': f.prozentVerbleibend,
+      }).toList();
+      await HomeWidgetWrapper.saveWidgetData('filamente_json', json.encode(filamentList));
+      
+      await HomeWidgetWrapper.updateWidget();
+    } catch (e) {
+      debugPrint('HomeWidget error: $e');
     }
   }
 
@@ -498,7 +771,7 @@ class _HomePageState extends State<HomePage> {
           ),
         ),
         title: Text(
-          _selectedIndex == 0 ? 'Inventar' : _selectedIndex == 1 ? 'Creator' : _selectedIndex == 2 ? 'Statistik' : 'Einstellungen',
+          _selectedIndex == 0 ? 'Inventar' : _selectedIndex == 1 ? 'Creator' : _selectedIndex == 2 ? 'Labels' : _selectedIndex == 3 ? 'Statistik' : 'Einstellungen',
           style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
         ),
         centerTitle: true,
@@ -514,16 +787,18 @@ class _HomePageState extends State<HomePage> {
               : _selectedIndex == 1
                   ? _buildCreator()
                   : _selectedIndex == 2
-                      ? _buildStatistics()
-                      : _buildSettings(),
+                      ? _buildLabels()
+                      : _selectedIndex == 3
+                          ? _buildStatistics()
+                          : _buildSettings(),
       floatingActionButton: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           FloatingActionButton.small(
-            heroTag: 'nfc',
-            onPressed: _scanNfcTag,
+            heroTag: 'scan',
+            onPressed: _scanQRCode,
             backgroundColor: const Color(0xFF00BCD4),
-            child: const Icon(Icons.nfc),
+            child: const Icon(Icons.qr_code_scanner),
           ),
           const SizedBox(height: 8),
           FloatingActionButton(
@@ -536,93 +811,39 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Future<void> _scanNfcTag() async {
-    try {
-      bool isAvailable = await NfcManager.instance.isAvailable();
-      if (!isAvailable) {
-        if (mounted) {
+  Future<void> _scanQRCode() async {
+    if (!Platform.isAndroid && !Platform.isIOS) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('QR-Scanner nur auf Mobile verfügbar')),
+      );
+      return;
+    }
+
+    final result = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => _QRScannerDialog(
+        onScanned: (code) => Navigator.pop(dialogContext, code),
+      ),
+    );
+
+    if (result != null && result.startsWith('FILAMENT:') && mounted) {
+      final parts = result.substring(9).split('|');
+      if (parts.isNotEmpty) {
+        final filamentId = parts[0];
+        final filament = _filamente.where((f) => f.id == filamentId).firstOrNull;
+        
+        if (filament != null) {
+          _showFilamentDetails(filament);
+        } else {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('NFC nicht verfügbar!')),
+            SnackBar(
+              content: Text('Filament nicht gefunden: $filamentId'),
+              backgroundColor: Colors.orange,
+            ),
           );
         }
-        return;
-      }
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Halte Handy an NFC-Tag...'),
-            duration: Duration(seconds: 15),
-          ),
-        );
-      }
-
-      await NfcManager.instance.startSession(
-        pollingOptions: {
-          NfcPollingOption.iso14443,
-          NfcPollingOption.iso15693,
-        },
-        onDiscovered: (NfcTag tag) async {
-          try {
-            String? tagId;
-            final tagData = tag.data as Map<String, dynamic>;
-            
-            if (tagData.containsKey('nfca')) {
-              final nfca = tagData['nfca'] as Map<dynamic, dynamic>?;
-              if (nfca != null && nfca['identifier'] != null) {
-                final id = nfca['identifier'] as List<dynamic>;
-                tagId = id.map((e) => (e as int).toRadixString(16).padLeft(2, '0')).join(':').toUpperCase();
-              }
-            }
-            
-            await NfcManager.instance.stopSession();
-            
-            if (tagId != null && mounted) {
-              // Check if filament with this NFC tag exists
-              final user = widget.supabase.auth.currentUser;
-              if (user?.id != null) {
-                final existing = await widget.supabase.from('filamente').select().eq('user_id', user!.id).eq('nfc_tag_id', tagId).maybeSingle();
-                
-                if (existing != null && mounted) {
-                  // Filament found - show details
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('Gefunden: ${existing['marke']} ${existing['typ']} ${existing['farbe']} (${existing['restgewicht_gramm']}g)'),
-                      backgroundColor: Colors.green,
-                      duration: const Duration(seconds: 5),
-                    ),
-                  );
-                } else if (mounted) {
-                  // No filament found - open dialog to create new one
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('Neuer NFC-Tag: $tagId - Lege jetzt ein Filament an!'),
-                      backgroundColor: const Color(0xFF00BCD4),
-                      duration: const Duration(seconds: 3),
-                    ),
-                  );
-                  _addFilamentWithNfc(tagId);
-                }
-              }
-            }
-          } catch (e) {
-            // Ignore errors
-          }
-        },
-      );
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('NFC Fehler: $e')),
-        );
       }
     }
-  }
-
-  Future<void> _addFilamentWithNfc(String nfcTagId) async {
-    // This opens the add filament dialog with the NFC tag pre-filled
-    // For now, just call the normal add filament - user needs to scan NFC again in dialog
-    _addFilament();
   }
 
   Widget _buildDrawer() {
@@ -675,8 +896,9 @@ class _HomePageState extends State<HomePage> {
           const SizedBox(height: 10),
           _buildDrawerItem(0, Icons.inventory_2_outlined, 'Inventar'),
           _buildDrawerItem(1, Icons.auto_awesome, 'Creator'),
-          _buildDrawerItem(2, Icons.bar_chart, 'Statistik'),
-          _buildDrawerItem(3, Icons.settings, 'Einstellungen'),
+          _buildDrawerItem(2, Icons.qr_code, 'Labels'),
+          _buildDrawerItem(3, Icons.bar_chart, 'Statistik'),
+          _buildDrawerItem(4, Icons.settings, 'Einstellungen'),
           const Spacer(),
           Padding(
             padding: const EdgeInsets.all(20),
@@ -753,7 +975,6 @@ class _HomePageState extends State<HomePage> {
     String selectedType = 'PLA';
     String selectedColor = 'Weiß';
     bool useCustomColor = false;
-    String? nfcTagId;
     final customColorController = TextEditingController();
     final gewichtController = TextEditingController(text: '1000');
     final preisController = TextEditingController(text: '25');
@@ -786,84 +1007,6 @@ class _HomePageState extends State<HomePage> {
                   ),
                   const SizedBox(height: 16),
                   const Text('Neues Filament', style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 16),
-                  OutlinedButton.icon(
-                    onPressed: () async {
-                      if (dialogContext.mounted) {
-                        ScaffoldMessenger.of(dialogContext).showSnackBar(
-                          const SnackBar(
-                            content: Text('NFC-Scan wird gestartet...'),
-                            duration: Duration(seconds: 3),
-                          ),
-                        );
-                      }
-                      
-                      try {
-                        bool isAvailable = await NfcManager.instance.isAvailable();
-                        if (!isAvailable) {
-                          if (dialogContext.mounted) {
-                            ScaffoldMessenger.of(dialogContext).showSnackBar(
-                              const SnackBar(content: Text('NFC nicht verfügbar oder deaktiviert!')),
-                            );
-                          }
-                          return;
-                        }
-                        
-                        await NfcManager.instance.startSession(
-                          pollingOptions: {
-                            NfcPollingOption.iso14443,
-                            NfcPollingOption.iso15693,
-                          },
-                          onDiscovered: (NfcTag tag) async {
-                            try {
-                              String? tagId;
-                              final tagData = tag.data as Map<String, dynamic>;
-                              
-                              if (tagData.containsKey('nfca')) {
-                                final nfca = tagData['nfca'] as Map<dynamic, dynamic>?;
-                                if (nfca != null && nfca['identifier'] != null) {
-                                  final id = nfca['identifier'] as List<dynamic>;
-                                  tagId = id.map((e) => (e as int).toRadixString(16).padLeft(2, '0')).join(':').toUpperCase();
-                                }
-                              }
-                              
-                              if (tagId != null && dialogContext.mounted) {
-                                setDialogState(() {
-                                  nfcTagId = tagId;
-                                });
-                                ScaffoldMessenger.of(dialogContext).showSnackBar(
-                                  SnackBar(
-                                    content: Text('NFC erkannt: $tagId'),
-                                    backgroundColor: Colors.green,
-                                  ),
-                                );
-                              }
-                            } catch (e) {
-                              // Ignore errors
-                            }
-                            try {
-                              await NfcManager.instance.stopSession();
-                            } catch (_) {}
-                          },
-                        );
-                      } catch (e) {
-                        if (dialogContext.mounted) {
-                          ScaffoldMessenger.of(dialogContext).showSnackBar(
-                            SnackBar(content: Text('NFC Fehler: $e')),
-                          );
-                        }
-                      }
-                    },
-                    icon: Icon(Icons.nfc, color: nfcTagId != null ? Colors.green : const Color(0xFF00BCD4)),
-                    label: Text(
-                      nfcTagId != null ? 'NFC: $nfcTagId' : 'NFC-Chip scannen', 
-                      style: TextStyle(color: nfcTagId != null ? Colors.green : const Color(0xFF00BCD4))
-                    ),
-                    style: OutlinedButton.styleFrom(
-                      side: BorderSide(color: nfcTagId != null ? Colors.green : const Color(0xFF00BCD4)),
-                      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
-                    ),
-                  ),
                   const SizedBox(height: 24),
                   DropdownButtonFormField<String>(
                     value: selectedManufacturer,
@@ -1033,7 +1176,6 @@ class _HomePageState extends State<HomePage> {
             'preis': double.tryParse(preisController.text) ?? 0,
             'user_id': user!.id,
             'gekauft_am': DateTime.now().toIso8601String(),
-            'nfc_tag_id': nfcTagId,
           });
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
@@ -1055,6 +1197,592 @@ class _HomePageState extends State<HomePage> {
   // ============ CREATOR (LEGO BUILDER) ============
   Widget _buildCreator() {
     return const LEGOBuilder();
+  }
+
+  // ============ LABELS ============
+  Filament? _selectedFilamentForLabel;
+  final Set<String> _selectedForBatchPrint = {};
+  
+  Widget _buildLabels() {
+    if (_filamente.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(24),
+              decoration: BoxDecoration(
+                color: const Color(0xFF00BCD4).withAlpha(26),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.qr_code, size: 64, color: Color(0xFF00BCD4)),
+            ),
+            const SizedBox(height: 24),
+            const Text('Noch keine Filamente', style: TextStyle(color: Colors.white70, fontSize: 18)),
+            const SizedBox(height: 8),
+            const Text('Erstelle zuerst Filamente um Labels zu drucken', style: TextStyle(color: Colors.white38, fontSize: 14)),
+          ],
+        ),
+      );
+    }
+
+    if (_selectedFilamentForLabel == null) {
+      _selectedFilamentForLabel = _filamente.first;
+    }
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [const Color(0xFF00BCD4).withAlpha(26), const Color(0xFF1E1E1E)],
+              ),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: const Color(0xFF00BCD4).withAlpha(51)),
+            ),
+            child: Column(
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF00BCD4).withAlpha(26),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: const Icon(Icons.qr_code, color: Color(0xFF00BCD4), size: 28),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text('Label Creator', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+                          Text('${_selectedForBatchPrint.isEmpty ? "Wähle ein Filament aus" : "${_selectedForBatchPrint.length} ausgewählt"}', style: const TextStyle(color: Colors.white54, fontSize: 12)),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF2D2D3D),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: DropdownButtonHideUnderline(
+                    child: DropdownButton<Filament>(
+                      isExpanded: true,
+                      dropdownColor: const Color(0xFF2D2D3D),
+                      value: _selectedFilamentForLabel,
+                      icon: const Icon(Icons.arrow_drop_down, color: Color(0xFF00BCD4)),
+                      style: const TextStyle(color: Colors.white, fontSize: 16),
+                      items: _filamente.map((f) {
+                        final color = _parseFilamentColor(f.farbe);
+                        return DropdownMenuItem(
+                          value: f,
+                          child: Row(
+                            children: [
+                              Container(
+                                width: 16, height: 16,
+                                decoration: BoxDecoration(
+                                  color: color,
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Text(
+                                  '${f.marke} ${f.typ} - ${f.farbe}',
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              Text(
+                                '${f.restgewichtGramm}g',
+                                style: TextStyle(
+                                  color: f.prozentVerbleibend < 20 ? Colors.red : f.prozentVerbleibend < 50 ? Colors.orange : const Color(0xFF00BCD4),
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      }).toList(),
+                      onChanged: (f) {
+                        setState(() {
+                          _selectedFilamentForLabel = f;
+                        });
+                      },
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    Checkbox(
+                      value: _selectedForBatchPrint.isNotEmpty && _selectedForBatchPrint.length == _filamente.length,
+                      tristate: true,
+                      activeColor: const Color(0xFF00BCD4),
+                      onChanged: (v) {
+                        setState(() {
+                          if (v == true) {
+                            _selectedForBatchPrint.addAll(_filamente.map((f) => f.id));
+                          } else {
+                            _selectedForBatchPrint.clear();
+                          }
+                        });
+                      },
+                    ),
+                    const Text('Alle auswählen', style: TextStyle(color: Colors.white70)),
+                    const Spacer(),
+                    if (_selectedForBatchPrint.isNotEmpty)
+                      FilledButton.icon(
+                        onPressed: _batchPrintLabels,
+                        icon: const Icon(Icons.print, size: 18),
+                        label: Text('Stapel drucken (${_selectedForBatchPrint.length})'),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: const Color(0xFF00BCD4),
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        ),
+                      ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 20),
+          if (_selectedFilamentForLabel != null && _selectedForBatchPrint.isEmpty)
+            _buildPreviewLabel(_selectedFilamentForLabel!),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _batchPrintLabels() async {
+    if (_selectedForBatchPrint.isEmpty) return;
+    
+    final selectedFilamente = _filamente.where((f) => _selectedForBatchPrint.contains(f.id)).toList();
+    
+    showDialog(
+      context: context,
+      builder: (dialogContext) => Dialog(
+        backgroundColor: const Color(0xFF1E1E2E),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('Stapel-Druck Vorschau', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 16),
+              Text('${selectedFilamente.length} Labels werden erstellt', style: const TextStyle(color: Colors.white70)),
+              const SizedBox(height: 16),
+              SizedBox(
+                width: double.infinity,
+                height: 300,
+                child: ListView.builder(
+                  itemCount: selectedFilamente.length,
+                  itemBuilder: (context, index) {
+                    final f = selectedFilamente[index];
+                    final color = _parseFilamentColor(f.farbe);
+                    return ListTile(
+                      leading: Container(
+                        width: 24, height: 24,
+                        decoration: BoxDecoration(
+                          color: color,
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                      ),
+                      title: Text('${f.marke} ${f.typ}', style: const TextStyle(color: Colors.white)),
+                      subtitle: Text('${f.farbe} - ${f.restgewichtGramm}g', style: TextStyle(color: color)),
+                    );
+                  },
+                ),
+              ),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.pop(dialogContext),
+                      child: const Text('Abbrechen'),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: FilledButton.icon(
+                      onPressed: () async {
+                        Navigator.pop(dialogContext);
+                        await _saveBatchLabels(selectedFilamente);
+                      },
+                      icon: const Icon(Icons.download),
+                      label: const Text('Alle speichern'),
+                      style: FilledButton.styleFrom(backgroundColor: const Color(0xFF00BCD4)),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _saveBatchLabels(List<Filament> filamente) async {
+    try {
+      String? outputDir = await FilePicker.platform.getDirectoryPath(
+        dialogTitle: 'Ordner für Labels auswählen',
+      );
+      
+      if (outputDir == null) return;
+      
+      int saved = 0;
+      for (final f in filamente) {
+        final labelData = await _generateLabelImage(f);
+        final fileName = 'Label_${f.marke}_${f.typ}_${f.farbe}.png';
+        final file = File('$outputDir\\$fileName');
+        await file.writeAsBytes(labelData);
+        saved++;
+      }
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('$saved Labels gespeichert in $outputDir'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Fehler: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
+  Future<Uint8List> _generateLabelImage(Filament f) async {
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder);
+    const width = 300.0;
+    const height = 350.0;
+    
+    final spoolColor = _parseFilamentColor(f.farbe);
+    final prozent = f.prozentVerbleibend;
+    
+    canvas.drawRect(const Rect.fromLTWH(0, 0, width, height), Paint()..color = Colors.white);
+    
+    canvas.drawRect(const Rect.fromLTWH(0, 0, width, 12), Paint()..color = spoolColor);
+    canvas.drawRect(const Rect.fromLTWH(0, height - 12, width, 12), Paint()..color = spoolColor.withAlpha(153));
+    
+    final textPainter = TextPainter(
+      text: TextSpan(
+        text: f.marke.toUpperCase(),
+        style: const TextStyle(color: Colors.black, fontSize: 16, fontWeight: FontWeight.bold),
+      ),
+      textDirection: TextDirection.ltr,
+    );
+    textPainter.layout();
+    textPainter.paint(canvas, const Offset(70, 30));
+    
+    textPainter.text = TextSpan(
+      text: f.typ,
+      style: TextStyle(color: spoolColor, fontSize: 14, fontWeight: FontWeight.w600),
+    );
+    textPainter.layout();
+    textPainter.paint(canvas, const Offset(70, 52));
+    
+    textPainter.text = TextSpan(
+      text: '${f.restgewichtGramm}g',
+      style: const TextStyle(color: Colors.black, fontSize: 24, fontWeight: FontWeight.bold),
+    );
+    textPainter.layout();
+    textPainter.paint(canvas, const Offset(20, 280));
+    
+    textPainter.text = TextSpan(
+      text: 'von ${f.gewichtGramm}g',
+      style: const TextStyle(color: Colors.grey, fontSize: 12),
+    );
+    textPainter.layout();
+    textPainter.paint(canvas, const Offset(20, 310));
+    
+    final picture = recorder.endRecording();
+    final image = await picture.toImage(width.toInt(), height.toInt());
+    final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+    return byteData!.buffer.asUint8List();
+  }
+
+  Widget _buildPreviewLabel(Filament f) {
+    final spoolColor = _parseFilamentColor(f.farbe);
+    final prozent = f.prozentVerbleibend;
+    
+    return Column(
+      children: [
+        Container(
+          width: 300,
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withAlpha(51),
+                blurRadius: 20,
+                offset: const Offset(0, 10),
+              ),
+            ],
+          ),
+          child: Column(
+            children: [
+              Container(
+                height: 12,
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [spoolColor, spoolColor.withAlpha(153)],
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                  ),
+                  borderRadius: const BorderRadius.vertical(top: Radius.circular(14)),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Container(
+                    width: 50, height: 50,
+                    decoration: BoxDecoration(
+                      color: spoolColor.withAlpha(51),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Center(
+                      child: Container(
+                        width: 30, height: 30,
+                        decoration: BoxDecoration(
+                          color: spoolColor,
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Center(
+                          child: Container(
+                            width: 10, height: 10,
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(2),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          f.marke.toUpperCase(),
+                          style: const TextStyle(color: Colors.black, fontSize: 14, fontWeight: FontWeight.bold, letterSpacing: 1),
+                        ),
+                        Text(
+                          f.typ,
+                          style: TextStyle(color: spoolColor, fontSize: 12, fontWeight: FontWeight.w600),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: prozent < 20 ? Colors.red : prozent < 50 ? Colors.orange : Colors.green,
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(
+                      '${prozent}%',
+                      style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              Container(
+                width: 150, height: 150,
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.grey.shade200, width: 2),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(8),
+                  child: QrImageView(
+                    data: 'FILAMENT:${f.id}|${f.marke}|${f.typ}|${f.farbe}|${f.restgewichtGramm}g',
+                    version: QrVersions.auto,
+                    size: 130,
+                    backgroundColor: Colors.white,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade100,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceAround,
+                  children: [
+                    Column(
+                      children: [
+                        const Text('REST', style: TextStyle(color: Colors.grey, fontSize: 10, fontWeight: FontWeight.w600)),
+                        Text(
+                          '${f.restgewichtGramm}g',
+                          style: const TextStyle(color: Colors.black, fontSize: 20, fontWeight: FontWeight.bold),
+                        ),
+                      ],
+                    ),
+                    Container(
+                      width: 1, height: 30,
+                      color: Colors.grey.shade300,
+                    ),
+                    Column(
+                      children: [
+                        const Text('ORIGINAL', style: TextStyle(color: Colors.grey, fontSize: 10, fontWeight: FontWeight.w600)),
+                        Text(
+                          '${f.gewichtGramm}g',
+                          style: const TextStyle(color: Colors.black, fontSize: 20, fontWeight: FontWeight.bold),
+                        ),
+                      ],
+                    ),
+                    Container(
+                      width: 1, height: 30,
+                      color: Colors.grey.shade300,
+                    ),
+                    Column(
+                      children: [
+                        const Text('FARBE', style: TextStyle(color: Colors.grey, fontSize: 10, fontWeight: FontWeight.w600)),
+                        Text(
+                          f.farbe,
+                          style: TextStyle(color: spoolColor, fontSize: 14, fontWeight: FontWeight.bold),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 20),
+        SizedBox(
+          width: 300,
+          child: FilledButton.icon(
+            onPressed: () => _showLabelDialog(f),
+            icon: const Icon(Icons.download),
+            label: const Text('Als PNG speichern'),
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFF00BCD4),
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildLabelCard(Filament f) {
+    final spoolColor = _parseFilamentColor(f.farbe);
+    final prozent = f.prozentVerbleibend;
+    final isLow = prozent < 20;
+
+    return GestureDetector(
+      onTap: () => _showLabelDialog(f),
+      child: Container(
+        decoration: BoxDecoration(
+          color: const Color(0xFF1E1E2E),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: isLow ? Colors.red.withAlpha(128) : Colors.white.withAlpha(13),
+          ),
+        ),
+        child: Column(
+          children: [
+            Container(
+              height: 8,
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [spoolColor, spoolColor.withAlpha(153)],
+                ),
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(15)),
+              ),
+            ),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  children: [
+                    Container(
+                      width: 60, height: 60,
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: QrImageView(
+                        data: 'FILAMENT:${f.id}|${f.marke}|${f.typ}|${f.farbe}|${f.restgewichtGramm}g',
+                        version: QrVersions.auto,
+                        size: 50,
+                        backgroundColor: Colors.white,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Text(
+                      f.farbe,
+                      style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '${f.marke} ${f.typ}',
+                      style: TextStyle(color: Colors.white.withAlpha(128), fontSize: 10),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.center,
+                    ),
+                    const Spacer(),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF00BCD4).withAlpha(26),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.download, size: 12, color: Color(0xFF00BCD4)),
+                          const SizedBox(width: 4),
+                          Text(
+                            'Label',
+                            style: TextStyle(color: const Color(0xFF00BCD4), fontSize: 10, fontWeight: FontWeight.w600),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   // ============ STATISTICS ============
@@ -1563,7 +2291,20 @@ class _HomePageState extends State<HomePage> {
                       ),
                     ),
                   ),
-                  const SizedBox(width: 12),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () => Navigator.pop(dialogContext, 'label'),
+                      icon: const Icon(Icons.qr_code, color: Color(0xFF00BCD4)),
+                      label: const Text('Label', style: TextStyle(color: Color(0xFF00BCD4))),
+                      style: OutlinedButton.styleFrom(
+                        side: const BorderSide(color: Color(0xFF00BCD4)),
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
                   Expanded(
                     child: FilledButton.icon(
                       onPressed: () => Navigator.pop(dialogContext, 'use'),
@@ -1590,7 +2331,259 @@ class _HomePageState extends State<HomePage> {
       _loadData();
     } else if (result == 'use') {
       _showUseDialog(f);
+    } else if (result == 'label') {
+      _showLabelDialog(f);
     }
+  }
+
+  void _showLabelDialog(Filament f) {
+    final GlobalKey _repaintKey = GlobalKey();
+    final spoolColor = _parseFilamentColor(f.farbe);
+    final prozent = f.prozentVerbleibend;
+    
+    showDialog(
+      context: context,
+      builder: (dialogContext) => Dialog(
+        backgroundColor: Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text('Filament Label', style: TextStyle(color: Colors.black, fontSize: 20, fontWeight: FontWeight.bold)),
+                  IconButton(
+                    onPressed: () => Navigator.pop(dialogContext),
+                    icon: const Icon(Icons.close, color: Colors.black54),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              RepaintBoundary(
+                key: _repaintKey,
+                child: Container(
+                  width: 280,
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(16),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withAlpha(26),
+                        blurRadius: 15,
+                        offset: const Offset(0, 5),
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    children: [
+                      Container(
+                        height: 12,
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: [spoolColor, spoolColor.withAlpha(153)],
+                            begin: Alignment.topCenter,
+                            end: Alignment.bottomCenter,
+                          ),
+                          borderRadius: const BorderRadius.vertical(top: Radius.circular(14)),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      Row(
+                        children: [
+                          Container(
+                            width: 50, height: 50,
+                            decoration: BoxDecoration(
+                              color: spoolColor.withAlpha(51),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Center(
+                              child: Container(
+                                width: 30, height: 30,
+                                decoration: BoxDecoration(
+                                  color: spoolColor,
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Center(
+                                  child: Container(
+                                    width: 10, height: 10,
+                                    decoration: BoxDecoration(
+                                      color: Colors.white,
+                                      borderRadius: BorderRadius.circular(2),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  f.marke.toUpperCase(),
+                                  style: const TextStyle(color: Colors.black, fontSize: 14, fontWeight: FontWeight.bold, letterSpacing: 1),
+                                ),
+                                Text(
+                                  f.typ,
+                                  style: TextStyle(color: spoolColor, fontSize: 12, fontWeight: FontWeight.w600),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: prozent < 20 ? Colors.red : prozent < 50 ? Colors.orange : Colors.green,
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: Text(
+                              '${prozent}%',
+                              style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                      Container(
+                        width: 150, height: 150,
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: Colors.grey.shade200, width: 2),
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.all(8),
+                          child: QrImageView(
+                            data: 'FILAMENT:${f.id}|${f.marke}|${f.typ}|${f.farbe}|${f.restgewichtGramm}g',
+                            version: QrVersions.auto,
+                            size: 130,
+                            backgroundColor: Colors.white,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Colors.grey.shade100,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceAround,
+                          children: [
+                            Column(
+                              children: [
+                                const Text('REST', style: TextStyle(color: Colors.grey, fontSize: 10, fontWeight: FontWeight.w600)),
+                                Text(
+                                  '${f.restgewichtGramm}g',
+                                  style: const TextStyle(color: Colors.black, fontSize: 18, fontWeight: FontWeight.bold),
+                                ),
+                              ],
+                            ),
+                            Container(
+                              width: 1, height: 30,
+                              color: Colors.grey.shade300,
+                            ),
+                            Column(
+                              children: [
+                                const Text('ORIGINAL', style: TextStyle(color: Colors.grey, fontSize: 10, fontWeight: FontWeight.w600)),
+                                Text(
+                                  '${f.gewichtGramm}g',
+                                  style: const TextStyle(color: Colors.black, fontSize: 18, fontWeight: FontWeight.bold),
+                                ),
+                              ],
+                            ),
+                            Container(
+                              width: 1, height: 30,
+                              color: Colors.grey.shade300,
+                            ),
+                            Column(
+                              children: [
+                                const Text('FARBE', style: TextStyle(color: Colors.grey, fontSize: 10, fontWeight: FontWeight.w600)),
+                                Text(
+                                  f.farbe,
+                                  style: TextStyle(color: spoolColor, fontSize: 12, fontWeight: FontWeight.bold),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () => Navigator.pop(dialogContext),
+                      icon: const Icon(Icons.close),
+                      label: const Text('Schließen'),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: FilledButton.icon(
+                      onPressed: () async {
+                        try {
+                          final boundary = _repaintKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
+                          if (boundary != null) {
+                            final image = await boundary.toImage(pixelRatio: 3.0);
+                            final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+                            if (byteData != null) {
+                              final pngBytes = byteData.buffer.asUint8List();
+                              
+                              String? outputFile = await FilePicker.platform.saveFile(
+                                dialogTitle: 'Label speichern',
+                                fileName: 'Label_${f.marke}_${f.typ}_${f.farbe}.png',
+                                type: FileType.image,
+                                allowedExtensions: ['png'],
+                              );
+                              
+                              if (outputFile != null) {
+                                if (!outputFile.toLowerCase().endsWith('.png')) {
+                                  outputFile += '.png';
+                                }
+                                final file = File(outputFile);
+                                await file.writeAsBytes(pngBytes);
+                                if (mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text('Label gespeichert: ${file.path.split('\\').last}'),
+                                      backgroundColor: Colors.green,
+                                    ),
+                                  );
+                                }
+                              }
+                            }
+                          }
+                        } catch (e) {
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text('Fehler: $e'), backgroundColor: Colors.red),
+                            );
+                          }
+                        }
+                      },
+                      icon: const Icon(Icons.download),
+                      label: const Text('Speichern'),
+                      style: FilledButton.styleFrom(backgroundColor: const Color(0xFF00BCD4)),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   Widget _detailRow(String label, String value, IconData icon) {
@@ -1702,31 +2695,33 @@ class _HomePageState extends State<HomePage> {
   // ============ DIALOGS ============
   Widget _buildSettings() {
     final user = widget.supabase.auth.currentUser;
-    return Padding(
-      padding: const EdgeInsets.all(24),
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
       child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // Account Section
           Container(
-            padding: const EdgeInsets.all(24),
+            width: double.infinity,
+            padding: const EdgeInsets.all(20),
             decoration: BoxDecoration(
               color: const Color(0xFF1E1E1E),
-              borderRadius: BorderRadius.circular(20),
+              borderRadius: BorderRadius.circular(16),
             ),
             child: Column(
               children: [
                 Container(
-                  padding: const EdgeInsets.all(20),
+                  padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
                     color: const Color(0xFF00BCD4).withAlpha(26),
                     shape: BoxShape.circle,
                   ),
-                  child: const Icon(Icons.person, color: Color(0xFF00BCD4), size: 48),
+                  child: const Icon(Icons.person, color: Color(0xFF00BCD4), size: 32),
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 12),
                 Text(
                   user?.email ?? 'Unbekannt',
-                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 4),
                 Text(
@@ -1736,7 +2731,23 @@ class _HomePageState extends State<HomePage> {
               ],
             ),
           ),
-          const SizedBox(height: 32),
+          const SizedBox(height: 24),
+          
+          // Klipper Section
+          _buildKlipperSettings(),
+          
+          const SizedBox(height: 24),
+          
+          // Version
+          Center(
+            child: Text(
+              'Version: 1.1.5',
+              style: TextStyle(color: Colors.white.withAlpha(77)),
+            ),
+          ),
+          const SizedBox(height: 16),
+          
+          // Logout
           SizedBox(
             width: double.infinity,
             child: FilledButton.icon(
@@ -1760,6 +2771,183 @@ class _HomePageState extends State<HomePage> {
         ],
       ),
     );
+  }
+
+  Widget _buildKlipperSettings() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1E1E1E),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF00BCD4).withAlpha(26),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Icon(Icons.print, color: Color(0xFF00BCD4)),
+              ),
+              const SizedBox(width: 12),
+              const Expanded(
+                child: Text(
+                  'Klipper Drucker',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
+              ),
+              if (_klipperConnected)
+                const Icon(Icons.check_circle, color: Colors.green, size: 20),
+            ],
+          ),
+          const SizedBox(height: 16),
+          TextField(
+            decoration: InputDecoration(
+              labelText: 'URL (z.B. http://192.168.1.100)',
+              labelStyle: TextStyle(color: Colors.white.withAlpha(153)),
+              prefixIcon: const Icon(Icons.link, color: Color(0xFF00BCD4)),
+              filled: true,
+              fillColor: const Color(0xFF2D2D3D),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+            ),
+            style: const TextStyle(color: Colors.white),
+            controller: TextEditingController(text: _klipperUrl),
+            onChanged: (v) => _klipperUrl = v,
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            decoration: InputDecoration(
+              labelText: 'API Key',
+              labelStyle: TextStyle(color: Colors.white.withAlpha(153)),
+              prefixIcon: const Icon(Icons.key, color: Color(0xFF00BCD4)),
+              filled: true,
+              fillColor: const Color(0xFF2D2D3D),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+            ),
+            style: const TextStyle(color: Colors.white),
+            controller: TextEditingController(text: _klipperApiKey),
+            onChanged: (v) => _klipperApiKey = v,
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: _testKlipperConnection,
+                  icon: const Icon(Icons.wifi_find),
+                  label: const Text('Test'),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: FilledButton.icon(
+                  onPressed: _saveKlipperSettings,
+                  icon: const Icon(Icons.save),
+                  label: const Text('Speichern'),
+                ),
+              ),
+            ],
+          ),
+          if (_klipperStatus != null) ...[
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: const Color(0xFF2D2D3D),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Status: ${_klipperStatus?['status'] ?? 'unbekannt'}',
+                    style: const TextStyle(color: Colors.white),
+                  ),
+                  if (_klipperStatus?['extruder'] != null) ...[
+                    Text(
+                      'Düse: ${_klipperStatus!['extruder']['temperature']}°C',
+                      style: TextStyle(color: Colors.white.withAlpha(179)),
+                    ),
+                  ],
+                  if (_klipperStatus?['heater_bed'] != null) ...[
+                    Text(
+                      'Bett: ${_klipperStatus!['heater_bed']['temperature']}°C',
+                      style: TextStyle(color: Colors.white.withAlpha(179)),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Future<void> _saveKlipperSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('klipper_url', _klipperUrl);
+    await prefs.setString('klipper_apikey', _klipperApiKey);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Klipper Einstellungen gespeichert!'), backgroundColor: Colors.green),
+      );
+    }
+  }
+
+  Future<void> _testKlipperConnection() async {
+    if (_klipperUrl.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Bitte URL eingeben'), backgroundColor: Colors.orange),
+        );
+      }
+      return;
+    }
+
+    try {
+      final url = _klipperUrl.endsWith('/') ? _klipperUrl : '$_klipperUrl/';
+      final response = await http.get(
+        Uri.parse('${url}api/status'),
+        headers: _klipperApiKey.isNotEmpty ? {'X-API-Key': _klipperApiKey} : {},
+      ).timeout(const Duration(seconds: 10));
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        setState(() {
+          _klipperStatus = data;
+          _klipperConnected = true;
+        });
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('✓ Verbunden!'), backgroundColor: Colors.green),
+          );
+        }
+      } else {
+        throw Exception('Fehler: ${response.statusCode}');
+      }
+    } catch (e) {
+      setState(() {
+        _klipperConnected = false;
+        _klipperStatus = null;
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Verbindung fehlgeschlagen: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
+  Future<void> _loadKlipperSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+    _klipperUrl = prefs.getString('klipper_url') ?? '';
+    _klipperApiKey = prefs.getString('klipper_apikey') ?? '';
+    setState(() {});
   }
 }
 
@@ -2318,7 +3506,6 @@ class _UpdateDownloadDialog extends StatefulWidget {
 
 class _UpdateDownloadDialogState extends State<_UpdateDownloadDialog> {
   String _status = 'Bereit zum Download...';
-  double _progress = 0;
   bool _downloading = false;
   bool _downloaded = false;
   String? _error;
@@ -2330,30 +3517,52 @@ class _UpdateDownloadDialogState extends State<_UpdateDownloadDialog> {
     });
 
     try {
-      final client = http.Client();
-      final request = http.Request('GET', Uri.parse(widget.url));
-      final response = await client.send(request);
+      final url = widget.url;
       
-      final contentLength = response.contentLength ?? 0;
-      final received = <int>[];
+      // Versuche verschiedene Methoden
+      bool launched = false;
       
-      await for (final chunk in response.stream) {
-        received.addAll(chunk);
-        if (contentLength > 0) {
-          setState(() {
-            _progress = received.length / contentLength;
-            _status = 'Download: ${(_progress * 100).toStringAsFixed(0)}%';
-          });
+      // Methode 1: launchUrl mit externalApplication
+      try {
+        final uri = Uri.parse(url);
+        if (await canLaunchUrl(uri)) {
+          launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+        }
+      } catch (e) {
+        debugPrint('Method 1 failed: $e');
+      }
+      
+      // Methode 2: launchUrl mit inAppWebView
+      if (!launched) {
+        try {
+          final uri = Uri.parse(url);
+          if (await canLaunchUrl(uri)) {
+            launched = await launchUrl(uri, mode: LaunchMode.inAppWebView);
+          }
+        } catch (e) {
+          debugPrint('Method 2 failed: $e');
         }
       }
       
-      if (mounted) {
-        setState(() {
-          _downloading = false;
-          _downloaded = true;
-          _progress = 1.0;
-          _status = 'Download abgeschlossen!';
-        });
+      // Methode 3: URL direkt öffnen
+      if (!launched) {
+        try {
+          launched = await launchUrl(Uri.parse(url));
+        } catch (e) {
+          debugPrint('Method 3 failed: $e');
+        }
+      }
+      
+      if (launched) {
+        if (mounted) {
+          setState(() {
+            _downloading = false;
+            _downloaded = true;
+            _status = 'Download im Browser gestartet!';
+          });
+        }
+      } else {
+        throw Exception('Konnte Download nicht starten');
       }
     } catch (e) {
       if (mounted) {
@@ -2362,19 +3571,6 @@ class _UpdateDownloadDialogState extends State<_UpdateDownloadDialog> {
           _error = e.toString();
           _status = 'Fehler: $e';
         });
-      }
-    }
-  }
-
-  Future<void> _openDownload() async {
-    final uri = Uri.parse(widget.url);
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
-    } else {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Konnte Download nicht öffnen')),
-        );
       }
     }
   }
@@ -2391,7 +3587,7 @@ class _UpdateDownloadDialogState extends State<_UpdateDownloadDialog> {
           ),
           const SizedBox(width: 8),
           Text(
-            _downloaded ? 'Update bereit' : 'Update verfügbar', 
+            _downloaded ? 'Download bereit' : 'Update verfügbar', 
             style: const TextStyle(color: Colors.white)
           ),
         ],
@@ -2403,96 +3599,73 @@ class _UpdateDownloadDialogState extends State<_UpdateDownloadDialog> {
           Text(widget.message, style: const TextStyle(color: Colors.white70)),
           const SizedBox(height: 20),
           if (_downloading) ...[
-            ClipRRect(
-              borderRadius: BorderRadius.circular(4),
-              child: LinearProgressIndicator(
-                value: _progress > 0 ? _progress : null,
-                backgroundColor: Colors.white24,
-                valueColor: const AlwaysStoppedAnimation(Color(0xFF00BCD4)),
-                minHeight: 8,
+            const SizedBox(
+              width: 16, height: 16,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: Color(0xFF00BCD4),
               ),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(width: 8),
+            Text(
+              _status,
+              style: const TextStyle(color: Color(0xFF00BCD4), fontSize: 12),
+            ),
           ],
-          Row(
-            children: [
-              if (_downloading)
-                const SizedBox(
-                  width: 16, height: 16,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    color: Color(0xFF00BCD4),
-                  ),
-                )
-              else if (_downloaded)
-                const Icon(Icons.check, color: Colors.green, size: 16)
-              else if (_error != null)
-                const Icon(Icons.error, color: Colors.red, size: 16),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  _status,
-                  style: TextStyle(
-                    color: _error != null ? Colors.red : const Color(0xFF00BCD4),
-                    fontSize: 12,
-                  ),
-                ),
-              ),
-            ],
-          ),
           if (_downloaded) ...[
             const SizedBox(height: 16),
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: Colors.orange.withAlpha(51),
+                color: const Color(0xFF00BCD4).withAlpha(26),
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.orange.withAlpha(77)),
+                border: Border.all(color: const Color(0xFF00BCD4)),
               ),
-              child: const Row(
+              child: const Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Icon(Icons.info_outline, color: Colors.orange, size: 20),
-                  SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      'Nach dem Öffnen wirst du gefragt, ob du die APK installieren möchtest.',
-                      style: TextStyle(color: Colors.orange, fontSize: 11),
-                    ),
+                  Row(
+                    children: [
+                      Icon(Icons.check_circle, color: Color(0xFF00BCD4), size: 20),
+                      SizedBox(width: 8),
+                      Text(
+                        'Download wurde gestartet!',
+                        style: TextStyle(color: Color(0xFF00BCD4), fontSize: 12, fontWeight: FontWeight.bold),
+                      ),
+                    ],
+                  ),
+                  SizedBox(height: 8),
+                  Text(
+                    'Der Download startet in deinem Browser.\nBitte dort die APK herunterladen und installieren.',
+                    style: TextStyle(color: Colors.white70, fontSize: 11),
                   ),
                 ],
               ),
             ),
           ],
+          if (_error != null) ...[
+            const SizedBox(height: 12),
+            Text(
+              _status,
+              style: const TextStyle(color: Colors.red, fontSize: 12),
+            ),
+          ],
         ],
       ),
       actions: [
-        if (!_downloaded) ...[
-          TextButton(
-            onPressed: _downloading ? null : () => Navigator.pop(context),
-            child: Text(
-              _downloading ? 'Warte...' : 'Abbrechen', 
-              style: const TextStyle(color: Colors.white54)
-            ),
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: Text(
+            _downloaded ? 'Schließen' : 'Abbrechen', 
+            style: const TextStyle(color: Colors.white54)
           ),
+        ),
+        if (!_downloaded && !_downloading)
           FilledButton(
-            onPressed: _downloading ? null : _startDownload,
+            onPressed: _startDownload,
             style: FilledButton.styleFrom(backgroundColor: const Color(0xFF00BCD4)),
             child: const Text('Download starten'),
           ),
-        ] else ...[
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Schließen', style: TextStyle(color: Colors.white54)),
-          ),
-          FilledButton(
-            onPressed: () {
-              Navigator.pop(context);
-              _openDownload();
-            },
-            style: FilledButton.styleFrom(backgroundColor: Colors.green),
-            child: const Text('Jetzt installieren'),
-          ),
-        ],
       ],
     );
   }
